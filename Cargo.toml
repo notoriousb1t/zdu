@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "zdu_lib",
+    "zdu_ui",
+]
+resolver = "2"
