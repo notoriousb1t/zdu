@@ -1,6 +1,5 @@
 mod app;
 mod config;
-mod patcher;
 mod server;
 mod views;
 

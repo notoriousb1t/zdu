@@ -4,3 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bsdiff = "0.2.1"
+qbsdiff = "1.4.4"

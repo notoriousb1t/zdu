@@ -26,6 +26,7 @@ pub enum Message {
     SeedInputChanged(String),
     RandomizeSeed,
     GenerateRom,
+    LogMessage(String),
     PortInputChanged(String),
 
     SetStartSword(u8),
@@ -341,8 +342,80 @@ impl State {
                 Task::none()
             }
             
+            Message::LogMessage(msg) => {
+                self.log.push(msg);
+                Task::none()
+            }
+            
             Message::GenerateRom => {
                 self.log.push("ROM Generation triggered.".to_string());
+                if let Some(base_path) = &self.base_rom_path {
+                    let mut inventory_options = zdu_lib::StartInventoryOptions::default();
+                    inventory_options.start_sword = self.start_sword;
+                    inventory_options.start_arrow = self.start_arrow;
+                    inventory_options.start_bow = self.start_bow;
+                    inventory_options.start_candle = self.start_candle;
+                    inventory_options.start_ring = self.start_ring;
+                    inventory_options.start_magic_shield = self.start_magic_shield;
+                    inventory_options.start_boomerang = self.start_boomerang;
+                    inventory_options.start_bombs = self.start_bombs_input.parse().unwrap_or(0);
+                    inventory_options.max_bombs = self.max_bombs_input.parse().unwrap_or(0);
+                    inventory_options.start_rupees = self.start_rupees_input.parse().unwrap_or(0);
+                    inventory_options.start_keys = self.start_keys_input.parse().unwrap_or(0);
+                    inventory_options.heart_containers = self.heart_containers;
+                    inventory_options.start_food = self.start_food;
+                    inventory_options.start_potion = self.start_potion;
+                    inventory_options.start_recorder = self.start_recorder;
+                    inventory_options.start_magic_rod = self.start_magic_rod;
+                    inventory_options.start_raft = self.start_raft;
+                    inventory_options.start_book = self.start_book;
+                    inventory_options.start_ladder = self.start_ladder;
+                    inventory_options.start_magic_key = self.start_magic_key;
+                    inventory_options.start_bracelet = self.start_bracelet;
+                    inventory_options.start_letter = self.start_letter;
+
+                    let mut progression_options = zdu_lib::ProgressionOptions::default();
+                    progression_options.compasses = self.compasses;
+                    progression_options.maps = self.maps;
+                    progression_options.triforce_pieces = self.triforce_pieces;
+                    progression_options.bosses_defeated = self.bosses_defeated;
+
+                    let base_path_clone = base_path.clone();
+                    
+                    return Task::perform(async move {
+                        // Offload blocking file I/O to a thread if possible, but async block is fine for now
+                        let mut game = match zdu_lib::Game::new(&base_path_clone) {
+                            Ok(g) => g,
+                            Err(e) => return format!("Failed to load base ROM: {}", e),
+                        };
+
+                        game.set_starting_inventory(&inventory_options);
+                        game.set_progression(&progression_options);
+                        
+                        let out_nes = std::path::Path::new("zdu_generated.nes");
+                        if let Err(e) = game.write(out_nes) {
+                            return format!("Failed to write generated ROM: {}", e);
+                        }
+
+                        let out_bsdiff = std::path::Path::new("zdu_generated.bsdiff");
+                        if let Err(e) = game.write_patch(out_bsdiff) {
+                            return format!("Failed to write patch: {}", e);
+                        }
+                        
+                        // TODO: Generate zdu_generated_spoiler.md
+                        
+                        // Show native success dialog
+                        let _ = rfd::MessageDialog::new()
+                            .set_title("Success")
+                            .set_description("Successfully generated ROM and patch!")
+                            .set_level(rfd::MessageLevel::Info)
+                            .show();
+                        
+                        "Successfully generated ROM and patch!".to_string()
+                    }, |msg| Message::LogMessage(msg));
+                } else {
+                    self.log.push("Error: Base ROM path not set.".to_string());
+                }
                 Task::none()
             }
         }
