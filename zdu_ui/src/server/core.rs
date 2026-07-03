@@ -2,27 +2,29 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::spawn;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{broadcast, Mutex};
 
 use super::state::{GameState, BroadcastUpdate};
 use super::protocol::{ServerMessage, ClientMessage, read_message, encode_assign, encode_update};
 
-pub const PORT: u16 = 42069;
-
 pub struct Server {
     pub state: Arc<Mutex<GameState>>,
     broadcast_tx: broadcast::Sender<BroadcastUpdate>,
     next_client_id: Arc<AtomicU32>,
+    pub port: u16,
 }
 
 impl Server {
-    pub fn new() -> (Self, broadcast::Receiver<BroadcastUpdate>) {
+    pub fn new(port: u16) -> (Self, broadcast::Receiver<BroadcastUpdate>) {
         let (tx, rx) = broadcast::channel(16);
         (
             Self {
                 state: Arc::new(Mutex::new(GameState::default())),
                 broadcast_tx: tx,
                 next_client_id: Arc::new(AtomicU32::new(1)),
+                port,
             },
             rx,
         )
@@ -33,15 +35,15 @@ impl Server {
         let _ = self.broadcast_tx.send(update);
     }
 
-    pub async fn run(self, ui_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>) {
-        let listener = match TcpListener::bind(("0.0.0.0", PORT)).await {
+    pub async fn run(self, ui_tx: UnboundedSender<ServerMessage>) {
+        let listener = match TcpListener::bind(("0.0.0.0", self.port)).await {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("Failed to bind TCP listener on port {}: {}", PORT, e);
+                eprintln!("Failed to bind TCP listener on port {}: {}", self.port, e);
                 return;
             }
         };
-        println!("Server listening on port {}", PORT);
+        println!("Server listening on port {}", self.port);
 
         loop {
             match listener.accept().await {
@@ -53,7 +55,7 @@ impl Server {
                     let bcast_rx = self.broadcast_tx.subscribe();
                     let ui_tx_clone = ui_tx.clone();
                     
-                    tokio::spawn(async move {
+                    spawn(async move {
                         handle_client(client_id, stream, state_clone, bcast_rx, ui_tx_clone).await;
                         println!("Client {} disconnected", client_id);
                     });
@@ -71,7 +73,7 @@ async fn handle_client(
     mut stream: TcpStream,
     state: Arc<Mutex<GameState>>,
     mut bcast_rx: broadcast::Receiver<BroadcastUpdate>,
-    ui_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+    ui_tx: UnboundedSender<ServerMessage>,
 ) {
     let (mut rx, mut tx) = stream.split();
     

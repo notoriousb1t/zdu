@@ -1,4 +1,6 @@
+use std::io::{self, ErrorKind};
 use tokio::io::AsyncReadExt;
+use tokio::net::tcp::ReadHalf;
 
 #[derive(Debug, Clone)]
 pub enum ServerMessage {
@@ -30,11 +32,11 @@ pub enum ClientMessage {
     },
 }
 
-pub async fn read_message(rx: &mut tokio::net::tcp::ReadHalf<'_>) -> std::io::Result<Option<ClientMessage>> {
+pub async fn read_message(rx: &mut ReadHalf<'_>) -> io::Result<Option<ClientMessage>> {
     let mut header = [0u8; 6]; // 1 byte type, 4 bytes Client ID, 1 byte Length
     let _ = match rx.read_exact(&mut header).await {
         Ok(n) => n,
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(None),
         Err(e) => return Err(e),
     };
     
