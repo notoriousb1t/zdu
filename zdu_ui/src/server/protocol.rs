@@ -33,7 +33,7 @@ pub enum ClientMessage {
 }
 
 pub async fn read_message(rx: &mut ReadHalf<'_>) -> io::Result<Option<ClientMessage>> {
-    let mut header = [0u8; 6]; // 1 byte type, 4 bytes Client ID, 1 byte Length
+    let mut header = [0u8; 7]; // 1 byte type, 4 bytes Client ID, 2 bytes Length
     let _ = match rx.read_exact(&mut header).await {
         Ok(n) => n,
         Err(e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(None),
@@ -46,7 +46,9 @@ pub async fn read_message(rx: &mut ReadHalf<'_>) -> io::Result<Option<ClientMess
     cid_bytes.copy_from_slice(&header[1..5]);
     let client_id = u32::from_be_bytes(cid_bytes);
     
-    let length = header[5] as usize;
+    let mut len_bytes = [0u8; 2];
+    len_bytes.copy_from_slice(&header[5..7]);
+    let length = u16::from_be_bytes(len_bytes) as usize;
     
     let mut payload = vec![0u8; length];
     if length > 0 {
@@ -100,7 +102,8 @@ pub fn encode_assign(assigned_id: u32) -> Vec<u8> {
     let mut msg = Vec::new();
     msg.push(0x00); // Message Type
     msg.extend_from_slice(&0u32.to_be_bytes()); // Server ID is 0
-    msg.push(4); // Length
+    let length: u16 = 4;
+    msg.extend_from_slice(&length.to_be_bytes()); // Length
     msg.extend_from_slice(&assigned_id.to_be_bytes());
     msg
 }
@@ -110,8 +113,8 @@ pub fn encode_update(sender_id: u32, change_number: u64, updates: &[(u8, u8)]) -
     msg.push(0x02); // Message Type
     msg.extend_from_slice(&sender_id.to_be_bytes());
     
-    let length = 8 + updates.len() * 2;
-    msg.push(length as u8); // Length
+    let length = (8 + updates.len() * 2) as u16;
+    msg.extend_from_slice(&length.to_be_bytes()); // Length
     
     msg.extend_from_slice(&change_number.to_be_bytes());
     for &(offset, val) in updates {

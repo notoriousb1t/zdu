@@ -67,12 +67,12 @@ local function receive_nonblock(count)
     return receive_exact(count)
 end
 
--- Wait for Assign message (10 bytes: 0x00, ServerID(4), Len=4, AssignedID(4))
-local assign_data = receive_exact(10)
+-- Wait for Assign message (11 bytes: 0x00, ServerID(4), Len=2(val=4), AssignedID(4))
+local assign_data = receive_exact(11)
 if assign_data then
     local msg_type = string.byte(assign_data, 1)
     if msg_type == 0x00 then
-        client_id = assign_data:sub(7, 10)
+        client_id = assign_data:sub(8, 11)
         local id_num = (string.byte(client_id, 1) * 16777216) + 
                        (string.byte(client_id, 2) * 65536) + 
                        (string.byte(client_id, 3) * 256) + 
@@ -93,7 +93,7 @@ end
 
 -- Send initial Check message
 local check_payload = pack_u64_zero()
-local check_msg = string.char(0x01) .. client_id .. string.char(8) .. check_payload
+local check_msg = string.char(0x01) .. client_id .. string.char(0, 8) .. check_payload
 send_msg(check_msg)
 
 -- Initialize local memory tracker to -1 so all values are sent initially
@@ -110,18 +110,18 @@ while true do
 
     if is_playing and not was_playing then
         -- Just entered playing mode (e.g. unpaused). Force a full sync from server.
-        local check_msg = string.char(0x01) .. client_id .. string.char(8) .. pack_u64_zero()
+        local check_msg = string.char(0x01) .. client_id .. string.char(0, 8) .. pack_u64_zero()
         send_msg(check_msg)
     end
     was_playing = is_playing
 
     -- 1. Read incoming messages
-    local header = receive_nonblock(6)
+    local header = receive_nonblock(7)
     local written_this_frame = {}
     
     if header then
         local msg_type = string.byte(header, 1)
-        local length = string.byte(header, 6)
+        local length = (string.byte(header, 6) * 256) + string.byte(header, 7)
         
         if length > 0 then
             local payload = receive_exact(length)
@@ -158,8 +158,10 @@ while true do
         
         if #updates > 0 then
             local payload_length = 8 + (#updates * 2)
-            if payload_length <= 255 then
-                local msg = string.char(0x02) .. client_id .. string.char(payload_length) .. pack_u64_zero()
+            if payload_length <= 65535 then
+                local high_byte = math.floor(payload_length / 256)
+                local low_byte = payload_length % 256
+                local msg = string.char(0x02) .. client_id .. string.char(high_byte, low_byte) .. pack_u64_zero()
                 for _, u in ipairs(updates) do
                     msg = msg .. u
                 end

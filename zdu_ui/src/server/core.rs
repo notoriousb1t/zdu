@@ -52,11 +52,12 @@ impl Server {
                     println!("Client {} connected: {}", client_id, addr);
                     let _ = ui_tx.send(ServerMessage::ClientConnected(client_id));
                     let state_clone = self.state.clone();
+                    let bcast_tx = self.broadcast_tx.clone();
                     let bcast_rx = self.broadcast_tx.subscribe();
                     let ui_tx_clone = ui_tx.clone();
                     
                     spawn(async move {
-                        handle_client(client_id, stream, state_clone, bcast_rx, ui_tx_clone).await;
+                        handle_client(client_id, stream, state_clone, bcast_tx, bcast_rx, ui_tx_clone).await;
                         println!("Client {} disconnected", client_id);
                     });
                 }
@@ -72,6 +73,7 @@ async fn handle_client(
     client_id: u32,
     mut stream: TcpStream,
     state: Arc<Mutex<GameState>>,
+    bcast_tx: broadcast::Sender<BroadcastUpdate>,
     mut bcast_rx: broadcast::Receiver<BroadcastUpdate>,
     ui_tx: UnboundedSender<ServerMessage>,
 ) {
@@ -124,6 +126,11 @@ async fn handle_client(
                                             client_id,
                                             change_number: new_change,
                                             updates: actual_changes.clone(),
+                                        });
+                                        let _ = bcast_tx.send(BroadcastUpdate {
+                                            sender_id: client_id,
+                                            new_change_number: new_change,
+                                            updates: actual_changes,
                                         });
                                     }
                                 }
