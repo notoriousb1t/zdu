@@ -89,7 +89,7 @@ fn build_all_items<'a, Message: 'a>(items: &HashMap<u8, u8>) -> Vec<Element<'a, 
             _ => "None".to_string(),
         }).into(),
         build_item_row("Food:", get_bool(0x06)).into(),
-        build_item_row("Heart Containers:", format!("{}", get_val(0x15))).into(),
+        build_item_row("Heart Containers:", format!("{}", (get_val(0x18) & 0x0F) + 1)).into(),
         build_item_row("Keys:", format!("{}", get_val(0x17))).into(),
         build_item_row("Ladder:", get_bool(0x0C)).into(),
         build_item_row("Letter:", get_bool(0x0F)).into(),
@@ -108,8 +108,8 @@ fn build_all_items<'a, Message: 'a>(items: &HashMap<u8, u8>) -> Vec<Element<'a, 
             2 => "Red".to_string(),
             _ => "None".to_string(),
         }).into(),
-        build_item_row("Rupees:", format!("{}", get_val(0x1B))).into(),
-        build_item_row("Shield:", match get_val(0x20) {
+        build_item_row("Rupees:", format!("{}", get_val(0x16))).into(),
+        build_item_row("Shield:", match get_val(0x1F) {
             1 => "Magical Shield".to_string(),
             _ => "Small Shield".to_string(),
         }).into(),
@@ -160,10 +160,10 @@ fn inventory_view<'a, Message: 'a>(items: &HashMap<u8, u8>) -> Element<'a, Messa
 fn progression_view<'a, Message: 'a>(items: &HashMap<u8, u8>) -> Column<'a, Message> {
     let get_val = |offset: u8| -> u8 { items.get(&offset).copied().unwrap_or(0) };
     
-    let compass_mask = get_val(0x18);
-    let map_mask = get_val(0x19);
-    let triforce_mask = get_val(0x1A);
-    let boss_mask = get_val(0x16);
+    let compass_mask = (get_val(0x10) as u16) | ((get_val(0x12) as u16) << 8);
+    let map_mask = (get_val(0x11) as u16) | ((get_val(0x13) as u16) << 8);
+    let triforce_mask = get_val(0x1A) as u16;
+    let boss_mask = get_val(0x1B) as u16;
 
     let mut table_headers = row![
         container(text("Level"))
@@ -183,7 +183,7 @@ fn progression_view<'a, Message: 'a>(items: &HashMap<u8, u8>) -> Column<'a, Mess
         );
     }
 
-    let build_row = |label: &'static str, mask: u8, is_triforce: bool| -> Row<'a, Message> {
+    let build_row = |label: &'static str, mask: u16, is_triforce: bool| -> Row<'a, Message> {
         let mut r = row![
             container(text(label))
                 .width(100)
@@ -203,7 +203,7 @@ fn progression_view<'a, Message: 'a>(items: &HashMap<u8, u8>) -> Column<'a, Mess
                 );
                 continue;
             }
-            let is_checked = ((mask as u16) & (1 << i)) != 0;
+            let is_checked = (mask & (1 << i)) != 0;
             let check_text = if is_checked { "✔️" } else { " " };
             r = r.push(
                 container(text(check_text))

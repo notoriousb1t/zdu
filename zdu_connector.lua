@@ -18,11 +18,15 @@ local connected = false
 print("Connecting to ZDU UI at 127.0.0.1:" .. PORT)
 
 -- Keep trying to connect until successful
+print("Waiting for game to enter playing mode before connecting...")
 while not connected do
-    local success, err = pcall(function() client:Connect("127.0.0.1", PORT) end)
-    if success then
-        connected = true
-    else
+    if memory.readbyte(0x0012) == 5 then
+        local success, err = pcall(function() client:Connect("127.0.0.1", PORT) end)
+        if success then
+            connected = true
+        end
+    end
+    if not connected then
         emu.frameadvance()
     end
 end
@@ -31,8 +35,9 @@ local stream = client:GetStream()
 print("Connected! Waiting for Assign message...")
 
 local function send_msg(msg_str)
-    local bytes = iso:GetBytes(msg_str)
-    stream:Write(bytes, 0, #msg_str)
+    for i=1, #msg_str do
+        stream:WriteByte(string.byte(msg_str, i))
+    end
     
     local hex = ""
     for i=1, #msg_str do
@@ -91,14 +96,25 @@ local check_payload = pack_u64_zero()
 local check_msg = string.char(0x01) .. client_id .. string.char(8) .. check_payload
 send_msg(check_msg)
 
--- Initialize local memory tracker
+-- Initialize local memory tracker to -1 so all values are sent initially
 for i = 0, MEM_LEN - 1 do
-    last_known_mem[i] = memory.readbyte(BASE_ADDR + i)
+    last_known_mem[i] = -1
 end
+
+local was_playing = false
 
 print("Starting main loop...")
 
 while true do
+    local is_playing = memory.readbyte(0x0012) == 5
+
+    if is_playing and not was_playing then
+        -- Just entered playing mode (e.g. unpaused). Force a full sync from server.
+        local check_msg = string.char(0x01) .. client_id .. string.char(8) .. pack_u64_zero()
+        send_msg(check_msg)
+    end
+    was_playing = is_playing
+
     -- 1. Read incoming messages
     local header = receive_nonblock(6)
     local written_this_frame = {}
@@ -110,7 +126,7 @@ while true do
         if length > 0 then
             local payload = receive_exact(length)
             
-            if payload and msg_type == 0x02 then
+            if payload and msg_type == 0x02 and is_playing then
                 local offset_count = (length - 8) / 2
                 for i = 0, offset_count - 1 do
                     local idx = 9 + (i * 2)
@@ -128,27 +144,29 @@ while true do
     end
 
     -- 2. Transmit local changes
-    local updates = {}
-    for i = 0, MEM_LEN - 1 do
-        if not written_this_frame[i] then
-            local current = memory.readbyte(BASE_ADDR + i)
-            if current ~= last_known_mem[i] then
-                last_known_mem[i] = current
-                table.insert(updates, string.char(i) .. string.char(current))
+    if is_playing then
+        local updates = {}
+        for i = 0, MEM_LEN - 1 do
+            if not written_this_frame[i] then
+                local current = memory.readbyte(BASE_ADDR + i)
+                if current ~= last_known_mem[i] then
+                    last_known_mem[i] = current
+                    table.insert(updates, string.char(i) .. string.char(current))
+                end
             end
         end
-    end
-    
-    if #updates > 0 then
-        local payload_length = 8 + (#updates * 2)
-        if payload_length <= 255 then
-            local msg = string.char(0x02) .. client_id .. string.char(payload_length) .. pack_u64_zero()
-            for _, u in ipairs(updates) do
-                msg = msg .. u
+        
+        if #updates > 0 then
+            local payload_length = 8 + (#updates * 2)
+            if payload_length <= 255 then
+                local msg = string.char(0x02) .. client_id .. string.char(payload_length) .. pack_u64_zero()
+                for _, u in ipairs(updates) do
+                    msg = msg .. u
+                end
+                send_msg(msg)
+            else
+                print("Warning: Too many updates for one message!")
             end
-            send_msg(msg)
-        else
-            print("Warning: Too many updates for one message!")
         end
     end
 
