@@ -6,7 +6,7 @@ local iso = Encoding.GetEncoding("ISO-8859-1")
 
 local PORT = 42069
 local BASE_ADDR = 0x0657
-local ADDR_END = 0x067F
+local ADDR_END = 0x07FE   -- extended from $067F; now covers OW + all UW WorldFlags
 local MEM_LEN = ADDR_END - BASE_ADDR + 1
 
 local client_id = nil
@@ -127,11 +127,13 @@ while true do
             local payload = receive_exact(length)
             
             if payload and msg_type == 0x02 and is_playing then
-                local offset_count = (length - 8) / 2
+                local offset_count = (length - 8) / 3
                 for i = 0, offset_count - 1 do
-                    local idx = 9 + (i * 2)
-                    local offset = string.byte(payload, idx)
-                    local val = string.byte(payload, idx + 1)
+                    local idx = 9 + (i * 3)
+                    local offset_high = string.byte(payload, idx)
+                    local offset_low = string.byte(payload, idx + 1)
+                    local offset = (offset_high * 256) + offset_low
+                    local val = string.byte(payload, idx + 2)
                     
                     if offset < MEM_LEN then
                         memory.writebyte(BASE_ADDR + offset, val)
@@ -151,13 +153,15 @@ while true do
                 local current = memory.readbyte(BASE_ADDR + i)
                 if current ~= last_known_mem[i] then
                     last_known_mem[i] = current
-                    table.insert(updates, string.char(i) .. string.char(current))
+                    local high_byte = math.floor(i / 256)
+                    local low_byte = i % 256
+                    table.insert(updates, string.char(high_byte, low_byte, current))
                 end
             end
         end
         
         if #updates > 0 then
-            local payload_length = 8 + (#updates * 2)
+            local payload_length = 8 + (#updates * 3)
             if payload_length <= 65535 then
                 local high_byte = math.floor(payload_length / 256)
                 local low_byte = payload_length % 256

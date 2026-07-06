@@ -2,6 +2,7 @@
 *.nes
 *.o
 *.bin
+*_spoiler.md
 
 zdu_asm
 target

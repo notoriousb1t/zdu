@@ -7,9 +7,7 @@ pub fn view<'a, Message: Clone + 'a>(log: &[String], on_clear: Message) -> Colum
         log_col = log_col.push(text(entry.clone()).size(14));
     }
 
-    let scrollable_log = scrollable(log_col)
-        .width(Length::Fill)
-        .height(Length::Fill);
+    let scrollable_log = scrollable(log_col).width(Length::Fill).height(Length::Fill);
 
     let header_row = row![
         text("Activity Log").size(32),
@@ -18,13 +16,9 @@ pub fn view<'a, Message: Clone + 'a>(log: &[String], on_clear: Message) -> Colum
     ]
     .align_y(Alignment::Center);
 
-    column![
-        header_row,
-        rule::horizontal(2),
-        scrollable_log,
-    ]
-    .spacing(20)
-    .align_x(Alignment::Start)
-    .width(Length::Fill)
-    .height(Length::Fill)
+    column![header_row, rule::horizontal(2), scrollable_log,]
+        .spacing(20)
+        .align_x(Alignment::Start)
+        .width(Length::Fill)
+        .height(Length::Fill)
 }

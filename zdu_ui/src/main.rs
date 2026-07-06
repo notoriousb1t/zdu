@@ -3,8 +3,8 @@ mod config;
 mod server;
 mod views;
 
-use iced::{application, window, Result, Size, Theme};
 use app::State;
+use iced::{application, window, Result, Size, Theme};
 
 pub fn main() -> Result {
     application(State::new, State::update, State::view)

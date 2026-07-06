@@ -21,7 +21,9 @@ pub fn view<'a, Message: Clone + 'a>(
         rule::horizontal(2),
         text("Please select a clean Legend of Zelda (USA) NES ROM file.").size(18),
         row![
-            text_input("ROM Path", rom_path).on_input(on_change).width(400),
+            text_input("ROM Path", rom_path)
+                .on_input(on_change)
+                .width(400),
             button("Browse").on_press(on_browse),
         ]
         .spacing(8)

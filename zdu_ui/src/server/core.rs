@@ -1,13 +1,13 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::spawn;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{broadcast, Mutex};
 
-use super::state::{GameState, BroadcastUpdate};
-use super::protocol::{ServerMessage, ClientMessage, read_message, encode_assign, encode_update};
+use super::protocol::{encode_assign, encode_update, read_message, ClientMessage, ServerMessage};
+use super::state::{BroadcastUpdate, GameState};
 
 pub struct Server {
     pub state: Arc<Mutex<GameState>>,
@@ -55,9 +55,17 @@ impl Server {
                     let bcast_tx = self.broadcast_tx.clone();
                     let bcast_rx = self.broadcast_tx.subscribe();
                     let ui_tx_clone = ui_tx.clone();
-                    
+
                     spawn(async move {
-                        handle_client(client_id, stream, state_clone, bcast_tx, bcast_rx, ui_tx_clone).await;
+                        handle_client(
+                            client_id,
+                            stream,
+                            state_clone,
+                            bcast_tx,
+                            bcast_rx,
+                            ui_tx_clone,
+                        )
+                        .await;
                         println!("Client {} disconnected", client_id);
                     });
                 }
@@ -78,14 +86,14 @@ async fn handle_client(
     ui_tx: UnboundedSender<ServerMessage>,
 ) {
     let (mut rx, mut tx) = stream.split();
-    
+
     // Immediately send Assign message
     let assign_msg = encode_assign(client_id);
     if tx.write_all(&assign_msg).await.is_err() {
         let _ = ui_tx.send(ServerMessage::ClientDisconnected(client_id));
         return;
     }
-    
+
     loop {
         tokio::select! {
             result = read_message(&mut rx) => {
@@ -118,7 +126,7 @@ async fn handle_client(
                                             actual_changes.push((offset, val));
                                         }
                                     }
-                                    
+
                                     if !actual_changes.is_empty() {
                                         s.change_number += 1;
                                         let new_change = s.change_number;
@@ -142,7 +150,7 @@ async fn handle_client(
                     Err(_) => break, // Read error
                 }
             }
-            
+
             result = bcast_rx.recv() => {
                 match result {
                     Ok(update) => {
@@ -159,6 +167,6 @@ async fn handle_client(
             }
         }
     }
-    
+
     let _ = ui_tx.send(ServerMessage::ClientDisconnected(client_id));
 }

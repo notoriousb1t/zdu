@@ -9,7 +9,9 @@ pub fn get_config_path() -> Option<PathBuf> {
 pub fn load_rom_path() -> Option<PathBuf> {
     let path = get_config_path()?;
     if path.exists() {
-        fs::read_to_string(path).ok().map(|s| PathBuf::from(s.trim()))
+        fs::read_to_string(path)
+            .ok()
+            .map(|s| PathBuf::from(s.trim()))
     } else {
         None
     }
