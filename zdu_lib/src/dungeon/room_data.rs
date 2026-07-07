@@ -20,6 +20,27 @@ impl RoomData {
             || !matches!(self.trigger, RoomTrigger::None)
             || self.doors.has_notable()
     }
+
+    pub fn format_row(&self) -> String {
+        let row = (self.room_id >> 4) as usize;
+        let col = (self.room_id & 0x0F) as usize;
+
+        let col_char = (b'A' + (col % 8) as u8) as char;
+        let row_char = (b'1' + row as u8) as char;
+
+        format!(
+            "| {}{} / ${:02X} | {} | {} | {} | {} | {} | {} |",
+            col_char,
+            row_char,
+            self.room_id,
+            self.item,
+            &self.trigger,
+            self.doors.north.label(),
+            self.doors.south.label(),
+            self.doors.east.label(),
+            self.doors.west.label(),
+        )
+    }
 }
 
 impl Display for RoomData {

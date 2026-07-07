@@ -77,6 +77,8 @@ pub struct LevelInfoRooms {
     pub boss_room: u8,
     /// Room IDs that contain staircases to hidden cellar rooms ($FF = unused slot).
     pub cellar_rooms: [u8; 10],
+    pub map_mask: [u8; 16],
+    pub map_rotation: u8,
 }
 
 /// Extract the full set of key room IDs from LevelInfo.
@@ -86,10 +88,16 @@ pub fn level_info_rooms(buf: &[u8], dungeon: u8) -> Option<LevelInfoRooms> {
     let start_room = *buf.get(base + 0x2F)?;
     let triforce_room = *buf.get(base + 0x30)?;
     let boss_room = *buf.get(base + 0x3E)?;
+    let map_rotation = *buf.get(base + 0x2D)?;
 
     let mut cellar_rooms = [0xFFu8; 10];
     for (i, slot) in cellar_rooms.iter_mut().enumerate() {
         *slot = buf.get(base + 0x34 + i).copied().unwrap_or(0xFF);
+    }
+
+    let mut map_mask = [0u8; 16];
+    for (i, slot) in map_mask.iter_mut().enumerate() {
+        *slot = buf.get(base + 0x3F + i).copied().unwrap_or(0);
     }
 
     Some(LevelInfoRooms {
@@ -97,6 +105,8 @@ pub fn level_info_rooms(buf: &[u8], dungeon: u8) -> Option<LevelInfoRooms> {
         triforce_room,
         boss_room,
         cellar_rooms,
+        map_mask,
+        map_rotation,
     })
 }
 
@@ -113,13 +123,20 @@ pub fn bfs_dungeon_rooms_full(buf: &[u8], block_base: usize, info: &LevelInfoRoo
     let mut visited = [false; 0x80];
     let mut queue = std::collections::VecDeque::new();
 
-    let seed =
-        |room: u8, visited: &mut [bool; 0x80], queue: &mut std::collections::VecDeque<u8>| {
-            if (room as usize) < 0x80 && !visited[room as usize] {
-                visited[room as usize] = true;
-                queue.push_back(room);
-            }
-        };
+    let left_half = (info.start_room & 0x0F) < 8;
+    let same_half = |r: u8| ((r & 0x0F) < 8) == left_half;
+
+    let is_cellar = |r: u8| r != 0xFF && info.cellar_rooms.contains(&r);
+
+    let seed = |room: u8,
+                visited: &mut [bool; 0x80],
+                queue: &mut std::collections::VecDeque<u8>| {
+        if (room as usize) < 0x80 && (is_cellar(room) || same_half(room)) && !visited[room as usize]
+        {
+            visited[room as usize] = true;
+            queue.push_back(room);
+        }
+    };
 
     seed(info.start_room, &mut visited, &mut queue);
     seed(info.triforce_room, &mut visited, &mut queue);
@@ -131,48 +148,118 @@ pub fn bfs_dungeon_rooms_full(buf: &[u8], block_base: usize, info: &LevelInfoRoo
     }
 
     while let Some(room) = queue.pop_front() {
-        let row = room >> 4;
-        let col = room & 0x0F;
-        let attrs_a = buf
-            .get(block_base + ATTRS_A_OFFSET + room as usize)
-            .copied()
-            .unwrap_or(0);
-        let attrs_b = buf
-            .get(block_base + ATTRS_B_OFFSET + room as usize)
-            .copied()
-            .unwrap_or(0);
+        if is_cellar(room) {
+            let attrs_a = buf
+                .get(block_base + ATTRS_A_OFFSET + room as usize)
+                .copied()
+                .unwrap_or(0xFF);
+            let attrs_b = buf
+                .get(block_base + ATTRS_B_OFFSET + room as usize)
+                .copied()
+                .unwrap_or(0xFF);
 
-        let north_kind = (attrs_a >> 5) & 0x07;
-        let south_kind = (attrs_a >> 2) & 0x07;
-        let west_kind = (attrs_b >> 5) & 0x07;
-        let east_kind = (attrs_b >> 2) & 0x07;
+            for &source in &[attrs_a, attrs_b] {
+                if source != 0xFF
+                    && (source as usize) < 0x80
+                    && same_half(source)
+                    && !visited[source as usize]
+                {
+                    visited[source as usize] = true;
+                    queue.push_back(source);
+                }
+            }
+        } else {
+            let row = room >> 4;
+            let col = room & 0x0F;
+            let attrs_a = buf
+                .get(block_base + ATTRS_A_OFFSET + room as usize)
+                .copied()
+                .unwrap_or(0);
+            let attrs_b = buf
+                .get(block_base + ATTRS_B_OFFSET + room as usize)
+                .copied()
+                .unwrap_or(0);
 
-        if passable(south_kind) && row < 0x07 {
-            let n = room + 0x10;
-            if (n as usize) < 0x80 && !visited[n as usize] {
-                visited[n as usize] = true;
-                queue.push_back(n);
+            let north_kind = (attrs_a >> 5) & 0x07;
+            let south_kind = (attrs_a >> 2) & 0x07;
+            let west_kind = (attrs_b >> 5) & 0x07;
+            let east_kind = (attrs_b >> 2) & 0x07;
+
+            if passable(south_kind) && row < 0x07 {
+                let n = room + 0x10;
+                if (n as usize) < 0x80 && same_half(n) && !visited[n as usize] {
+                    let n_attrs_a = buf
+                        .get(block_base + ATTRS_A_OFFSET + n as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    let n_north_kind = (n_attrs_a >> 5) & 0x07;
+                    if passable(n_north_kind) {
+                        visited[n as usize] = true;
+                        queue.push_back(n);
+                    }
+                }
             }
-        }
-        if passable(north_kind) && row > 0 {
-            let n = room - 0x10;
-            if !visited[n as usize] {
-                visited[n as usize] = true;
-                queue.push_back(n);
+            if passable(north_kind) && row > 0 {
+                let n = room - 0x10;
+                if (n as usize) < 0x80 && same_half(n) && !visited[n as usize] {
+                    let n_attrs_a = buf
+                        .get(block_base + ATTRS_A_OFFSET + n as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    let n_south_kind = (n_attrs_a >> 2) & 0x07;
+                    if passable(n_south_kind) {
+                        visited[n as usize] = true;
+                        queue.push_back(n);
+                    }
+                }
             }
-        }
-        if passable(east_kind) && col < 0x0F {
-            let n = room + 1;
-            if (n as usize) < 0x80 && !visited[n as usize] {
-                visited[n as usize] = true;
-                queue.push_back(n);
+            if passable(east_kind) && col < 0x0F {
+                let n = room + 1;
+                if (n as usize) < 0x80 && same_half(n) && !visited[n as usize] {
+                    let n_attrs_b = buf
+                        .get(block_base + ATTRS_B_OFFSET + n as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    let n_west_kind = (n_attrs_b >> 5) & 0x07;
+                    if passable(n_west_kind) {
+                        visited[n as usize] = true;
+                        queue.push_back(n);
+                    }
+                }
             }
-        }
-        if passable(west_kind) && col > 0 {
-            let n = room - 1;
-            if !visited[n as usize] {
-                visited[n as usize] = true;
-                queue.push_back(n);
+            if passable(west_kind) && col > 0 {
+                let n = room - 1;
+                if (n as usize) < 0x80 && same_half(n) && !visited[n as usize] {
+                    let n_attrs_b = buf
+                        .get(block_base + ATTRS_B_OFFSET + n as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    let n_east_kind = (n_attrs_b >> 2) & 0x07;
+                    if passable(n_east_kind) {
+                        visited[n as usize] = true;
+                        queue.push_back(n);
+                    }
+                }
+            }
+
+            // Check if any cellar room is connected to this room
+            for &cr in &info.cellar_rooms {
+                if cr != 0xFF {
+                    let attrs_a = buf
+                        .get(block_base + ATTRS_A_OFFSET + cr as usize)
+                        .copied()
+                        .unwrap_or(0xFF);
+                    let attrs_b = buf
+                        .get(block_base + ATTRS_B_OFFSET + cr as usize)
+                        .copied()
+                        .unwrap_or(0xFF);
+                    if attrs_a == room || attrs_b == room {
+                        if (cr as usize) < 0x80 && !visited[cr as usize] {
+                            visited[cr as usize] = true;
+                            queue.push_back(cr);
+                        }
+                    }
+                }
             }
         }
     }

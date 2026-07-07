@@ -175,6 +175,8 @@ impl Game {
                 triforce_room: 0xFF,
                 boss_room: 0xFF,
                 cellar_rooms: [0xFF; 10],
+                map_mask: [0; 16],
+                map_rotation: 0,
             });
 
         let room_ids = rom_ext::bfs_dungeon_rooms_full(&self.buffer, block_base, &info);
@@ -212,10 +214,65 @@ impl Game {
             })
             .collect();
 
+        let mut cellar_entrances = Vec::new();
+        let mut item_cellar_entrances = Vec::new();
+        for &cr in &info.cellar_rooms {
+            if cr != 0xFF {
+                let raw_e = self
+                    .buffer
+                    .get(rom_ext::attrs_e_offset(block_base, cr))
+                    .copied()
+                    .unwrap_or(0);
+                let item = RoomItem::from_id(raw_e & 0x1F);
+                let is_item_cellar = !matches!(item, RoomItem::None);
+
+                let attrs_a = self
+                    .buffer
+                    .get(rom_ext::attrs_a_offset(block_base, cr))
+                    .copied()
+                    .unwrap_or(0xFF);
+                let attrs_b = self
+                    .buffer
+                    .get(rom_ext::attrs_b_offset(block_base, cr))
+                    .copied()
+                    .unwrap_or(0xFF);
+
+                let target_vec = if is_item_cellar {
+                    &mut item_cellar_entrances
+                } else {
+                    &mut cellar_entrances
+                };
+
+                if attrs_a != 0xFF && attrs_a < 0x80 {
+                    target_vec.push(attrs_a);
+                }
+                if attrs_b != 0xFF && attrs_b < 0x80 {
+                    target_vec.push(attrs_b);
+                }
+            }
+        }
+        let mut cellar_rooms = Vec::new();
+        for &cr in &info.cellar_rooms {
+            if cr != 0xFF {
+                cellar_rooms.push(cr);
+            }
+        }
+
+        cellar_entrances.sort();
+        cellar_entrances.dedup();
+        item_cellar_entrances.sort();
+        item_cellar_entrances.dedup();
+
         DungeonLevel {
             dungeon,
             start_room: info.start_room,
             rooms,
+            map_mask: info.map_mask,
+            map_rotation: info.map_rotation,
+            cellar_entrances,
+            item_cellar_entrances,
+            cellar_rooms,
+            triforce_room: info.triforce_room,
         }
     }
 
